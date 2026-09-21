@@ -4,7 +4,7 @@
 #   "How to Talk to Your Programs: Interprocess Communication for
 #    Data Scientists", The American Statistician (Teacher's Corner)
 #
-# Python equivalent: ipcex1.py (Listing 1 in the paper)
+# Python equivalent: ipcexm1.py (Listing 1 in the paper)
 #
 # R does not expose POSIX signal handlers directly, but setTimeLimit()
 # achieves the same effect: on Unix/macOS it uses SIGALRM internally;

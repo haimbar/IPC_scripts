@@ -1,69 +1,63 @@
 """
-ipcex_socket_secure.py  --  Hardened socket server and client
-                             for the talk2stat architecture
+ipcex_socket_secure.py -- A hardened version of the minimal socket
+server/client shown in the paper's "Sockets" subsection (Section 2.4).
 
 Supplementary material for:
-  "How to Talk to Your Programs: Interprocess Communication for
-   Data Scientists", The American Statistician (Teacher's Corner)
+  "How to Talk to Your Programs: A Practical Introduction to
+   Interprocess Communication for Data Scientists"
 
-This file extends the abridged server/client code (Listings 5 and 6
-in the paper) with three security measures:
+The paper's minimal example is deliberately bare: it shows only
+bind/listen/accept/connect and a single send/recv exchange. Before
+exposing a socket server to anything beyond a trusted, single-user
+localhost connection, the paper recommends three additions, all
+implemented here:
 
-  1. Token authentication  -- the client sends a shared secret before
-                               any code is submitted; the server uses
-                               hmac.compare_digest (constant-time) to
-                               prevent timing-based attacks.
-
-  2. Connection timeout     -- conn.settimeout() drops idle or slow
-                               clients automatically; the server never
-                               blocks indefinitely waiting for input.
-
-  3. Input-length check     -- messages larger than MAX_INPUT_BYTES are
-                               rejected before being forwarded to the
-                               interpreter.
+  1. Token authentication -- the client sends a shared secret as its
+     first message; the server checks it with hmac.compare_digest
+     (constant-time, to avoid a timing side channel) before accepting
+     any further input.
+  2. Connection timeouts -- conn.settimeout() ensures the server never
+     blocks indefinitely on a slow or unresponsive client.
+  3. Input-length validation -- messages larger than MAX_INPUT_BYTES
+     are rejected before being processed.
 
 USAGE
 -----
-  Set the shared token via an environment variable (do not hard-code it):
+  Set the shared secret (do not hard-code it in real use):
 
-      export TALK2STAT_TOKEN="your-secret-token"
+      export IPC_DEMO_TOKEN="your-secret-token"
 
   Start the server in one terminal:
 
       python ipcex_socket_secure.py server
 
-  Run a query from a client in another terminal (or from LaTeX via runcode):
+  Run the client in another terminal:
 
-      python ipcex_socket_secure.py client "1 + 1"
+      python ipcex_socket_secure.py client
 
-Requires: pexpect  (pip install pexpect)
+Requires: standard library only.
 """
 
 import sys
 import os
 import hmac
 import socket
-import pexpect
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-HOST          = '127.0.0.1'
-PORT          = 54345
-PROMPTCHAR    = 'julia> '
-MAX_INPUT_BYTES = 1024 * 1024          # 1 MB hard limit on incoming messages
-AUTH_TIMEOUT  = 10                     # seconds to receive token from client
-EXEC_TIMEOUT  = 60                     # seconds to wait for Julia output
-IDLE_TIMEOUT  = 60                     # seconds before dropping idle client
+HOST            = '127.0.0.1'
+PORT            = 6000
+MAX_INPUT_BYTES = 1024          # reject anything larger
+AUTH_TIMEOUT    = 10            # seconds to receive the token
+IDLE_TIMEOUT    = 60            # seconds before dropping an idle client
 
-# Retrieve the secret from the environment; never fall back to a guessable
-# default in production.  The fallback here is for demonstration only.
-SECRET_TOKEN  = os.environ.get('TALK2STAT_TOKEN', 'demo-token-change-me')
+# Retrieve the secret from the environment; never fall back to a
+# guessable default in production. The fallback here is for
+# demonstration only.
+SECRET_TOKEN = os.environ.get('IPC_DEMO_TOKEN', 'demo-token-change-me')
 
 
-# ---------------------------------------------------------------------------
-# Shared helper
-# ---------------------------------------------------------------------------
 def verify_token(received: bytes) -> bool:
     """Constant-time comparison to prevent timing side-channel attacks."""
     return hmac.compare_digest(received.strip(), SECRET_TOKEN.encode())
@@ -74,99 +68,63 @@ def verify_token(received: bytes) -> bool:
 # ---------------------------------------------------------------------------
 def run_server():
     """
-    Spawns Julia, binds a socket, and serves requests authenticated by a
-    shared token.  Each accepted connection must present the token as its
-    first message before any code will be executed.
+    Binds a socket and serves a single authenticated request, guarded
+    by connection timeouts and an input-length check, then exits --
+    the same 'hello' / 'ack' exchange as the paper's minimal example,
+    hardened.
     """
-    print(f'Starting Julia...')
-    child = pexpect.spawn('julia -q --color=no --banner=no')
-    child.expect(PROMPTCHAR, timeout=EXEC_TIMEOUT)
-    print(f'Julia ready.  Binding {HOST}:{PORT} (PID {os.getpid()})')
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind((HOST, PORT))
+        s.listen()
+        print(f'Listening on {HOST}:{PORT} (PID {os.getpid()})')
 
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as srv:
-        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            srv.bind((HOST, PORT))
-        except OSError as exc:
-            print(f'Cannot bind {HOST}:{PORT} -- {exc}')
-            print('Another process may already be using this port.')
-            return
-
-        srv.listen()
-        keepgoing = True
-
-        while keepgoing:
+        conn, addr = s.accept()
+        with conn:
+            # --- Step 1: authenticate ---------------------------------
+            conn.settimeout(AUTH_TIMEOUT)
             try:
-                conn, addr = srv.accept()
-            except KeyboardInterrupt:
-                print('\nShutting down.')
-                break
+                token_received = conn.recv(4096)
+            except socket.timeout:
+                print(f'Auth timeout from {addr}; closing.')
+                return
 
-            with conn:
-                # --- Step 1: authenticate --------------------------------
-                conn.settimeout(AUTH_TIMEOUT)
-                try:
-                    token_received = conn.recv(4096)
-                except socket.timeout:
-                    print(f'Auth timeout from {addr}; closing.')
-                    continue
+            if not verify_token(token_received):
+                conn.sendall(b'AUTH_FAILED')
+                print(f'Bad token from {addr}; connection rejected.')
+                return
 
-                if not verify_token(token_received):
-                    conn.sendall(b'AUTH_FAILED')
-                    print(f'Bad token from {addr}; connection rejected.')
-                    continue
+            conn.sendall(b'AUTH_OK')
 
-                conn.sendall(b'AUTH_OK')
+            # --- Step 2: serve the request, guarded by an idle timeout
+            conn.settimeout(IDLE_TIMEOUT)
+            try:
+                data = conn.recv(MAX_INPUT_BYTES + 1)
+            except socket.timeout:
+                print(f'Idle timeout from {addr}; closing.')
+                return
 
-                # --- Step 2: serve requests from this authenticated client
-                conn.settimeout(IDLE_TIMEOUT)
-                buffer = []
+            # --- Step 3: validate input length -------------------------
+            if len(data) > MAX_INPUT_BYTES:
+                conn.sendall(b'ERROR: input exceeds size limit')
+                print(f'Oversized input from {addr}; rejected.')
+                return
 
-                while True:
-                    try:
-                        raw = conn.recv(MAX_INPUT_BYTES)
-                    except socket.timeout:
-                        print(f'Idle timeout from {addr}; closing.')
-                        break
+            print(conn.getpeername(), '->', data.decode())  # 'hello'
+            conn.sendall(b'ack')
 
-                    if not raw:
-                        break
-
-                    # --- Step 3: validate input length --------------------
-                    if len(raw) >= MAX_INPUT_BYTES:
-                        conn.sendall(b'ERROR: input exceeds size limit\nEND')
-                        continue
-
-                    user_input = raw.decode(errors='replace')
-
-                    if user_input.endswith('QUIT'):
-                        keepgoing = False
-                        break
-
-                    # Forward to Julia through the pipe
-                    child.sendline(user_input)
-                    try:
-                        child.expect(PROMPTCHAR, timeout=EXEC_TIMEOUT)
-                    except pexpect.TIMEOUT:
-                        buffer.append('TIMED OUT')
-
-                    buffer.append(child.before)
-                    buffer.append('\nEND')
-                    conn.sendall(''.join(buffer).encode())
-                    buffer.clear()
-
-    child.close()
     print('Server stopped.')
 
 
 # ---------------------------------------------------------------------------
 # Client
 # ---------------------------------------------------------------------------
-def run_client(code: str) -> bool:
+def run_client() -> bool:
     """
-    Connects to the server, authenticates, sends Julia code, and prints the
-    result.  Returns True on success, False if the server is unreachable or
-    authentication fails.
+    Connects to the server, authenticates with the shared token, then
+    sends 'hello' and prints the server's reply. Returns True on
+    success, False if the server is unreachable or authentication
+    fails.
     """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(10)
@@ -176,7 +134,6 @@ def run_client(code: str) -> bool:
             print(f'Server not available at {HOST}:{PORT}.')
             return False
 
-        # --- Authenticate ------------------------------------------------
         s.sendall(SECRET_TOKEN.encode())
         try:
             response = s.recv(4096)
@@ -188,22 +145,8 @@ def run_client(code: str) -> bool:
             print('Authentication failed.')
             return False
 
-        # --- Send code and collect response ------------------------------
-        s.settimeout(EXEC_TIMEOUT + 10)   # allow time for Julia to evaluate
-        s.sendall(code.rstrip().encode())
-
-        resp = ''
-        try:
-            while not resp.endswith('END'):
-                chunk = s.recv(MAX_INPUT_BYTES).decode(errors='replace')
-                if not chunk:
-                    break
-                resp += chunk
-        except socket.timeout:
-            print('Timed out waiting for server response.')
-            return False
-
-        print(resp.rstrip('END\n'))
+        s.sendall(b'hello')
+        print(s.recv(1024).decode())      # 'ack'
     return True
 
 
@@ -211,15 +154,13 @@ def run_client(code: str) -> bool:
 # Entry point
 # ---------------------------------------------------------------------------
 if __name__ == '__main__':
-    if len(sys.argv) < 2 or sys.argv[1] not in ('server', 'client'):
+    if len(sys.argv) != 2 or sys.argv[1] not in ('server', 'client'):
         print('Usage:')
         print('  python ipcex_socket_secure.py server')
-        print('  python ipcex_socket_secure.py client "<julia code>"')
+        print('  python ipcex_socket_secure.py client')
         sys.exit(1)
 
     if sys.argv[1] == 'server':
         run_server()
     else:
-        code = sys.argv[2] if len(sys.argv) > 2 else '1 + 1'
-        success = run_client(code)
-        sys.exit(0 if success else 1)
+        sys.exit(0 if run_client() else 1)

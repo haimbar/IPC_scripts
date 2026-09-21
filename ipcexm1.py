@@ -1,34 +1,28 @@
 import signal, os
 
-# First example (adapted from the signal package documentation
-# https://docs.python.org/3/library/signal.html )
+# Example #1 (timeout): Corresponds to Listing 1 ("Setting a timeout
+# with SIGALRM") in the paper.
+#
+# signal.alarm(5) asks the OS to deliver SIGALRM five seconds from
+# now; signal.signal(...) registers handle_timeout to run when it
+# arrives, replacing the OS default (silent process termination).
+# Any signal except SIGKILL and SIGSTOP can be redirected this way.
 
-# Implement a timeout for processes which may hang. Set a timer which
-# will stop the program if it doesn't complete what it has to do within
-# 5 seconds
 
-pid = os.getpid()
-print(f'PID={pid}')
-
-# Set the signal handler and a 5-second alarm.
-# In this example, the signal is sent to the handletimeout function
-# from within the someloop function.
-def someloop():
-    signal.signal(signal.SIGALRM, handletimeout)
-    signal.alarm(5)
-    while True:
+def run_with_timeout():
+    signal.signal(signal.SIGALRM, handle_timeout)
+    signal.alarm(5)           # ask OS: send SIGALRM in 5 seconds
+    while True:                # simulates a hanging operation
         pass
-    # Disable the alarm
-    signal.alarm(0)
+    signal.alarm(0)           # cancel alarm if we finish early
 
 
-# Define what to do when getting the ALRM signal
-def handletimeout(signum, frame):
-    signame = signal.Signals(signum).name
-    print(f'Something went wrong. Got {signame} ({signum}) Aborting!')
-    exit(0)
+def handle_timeout(signum, frame):
+    name = signal.Signals(signum).name
+    print(f'Timed out ({name}). Aborting.')
+    exit(1)
 
 
-someloop()
-
-print("Can now move on to the rest of the code")
+if __name__ == "__main__":
+    print(f'PID {os.getpid()}')
+    run_with_timeout()

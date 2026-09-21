@@ -4,20 +4,27 @@
 #   "How to Talk to Your Programs: Interprocess Communication for
 #    Data Scientists", The American Statistician (Teacher's Corner)
 #
-# Python equivalent: ipcex3.py (Listing 3 in the paper)
+# Python equivalent: ipcexm4.py (Listing 3 in the paper)
 #
-# The Python version uses os.fork() + SIGCHLD to implement dynamic task
-# assignment: whenever a child finishes, the parent is notified via
-# SIGCHLD and assigns the next task to the freed slot.
+# The Python version forks M workers ONCE; each worker claims the next
+# unclaimed task index for itself (protected by a lock) as soon as it
+# is free, rather than the parent forking a fresh child per task.
+# SIGCHLD is used only so the parent can tell, without polling, when
+# all M workers have exited.
 #
-# R's parallel::mclapply() with mc.preschedule = FALSE implements the
-# same policy through the same underlying mechanism (fork + SIGCHLD).
-# With mc.preschedule = TRUE (the default), tasks are partitioned
-# statically into mc.cores batches before any forking occurs -- that
-# is the static-partition approach that leads to idle processors.
-# Setting mc.preschedule = FALSE instead forks one process per task,
-# capping concurrency at mc.cores, and starts the next task as soon
-# as a slot opens.
+# R's parallel::mclapply() has no built-in equivalent of that
+# persistent, self-serving worker pool: with mc.preschedule = FALSE it
+# still forks a fresh child for each task (up to mc.cores at a time),
+# rather than reusing a fixed pool -- more like the naive per-task-fork
+# design the paper argues against than the pool in Listing 3. It is
+# used here anyway because it is the standard, idiomatic R tool for
+# dynamic (as opposed to static) task assignment, and it fixes the same
+# underlying problem: with mc.preschedule = TRUE (the default), tasks
+# are partitioned statically into mc.cores batches before any forking
+# occurs -- the static-partition approach that leads to idle
+# processors. Setting mc.preschedule = FALSE instead starts the next
+# task as soon as a slot opens, so no processor sits idle while a
+# batch mate is still working through a slow task.
 #
 # NOTE: mclapply() uses fork() and works on Linux and macOS only.
 #       For a cross-platform (including Windows) alternative using

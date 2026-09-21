@@ -4,7 +4,7 @@
 #   "How to Talk to Your Programs: Interprocess Communication for
 #    Data Scientists", The American Statistician (Teacher's Corner)
 #
-# Python equivalent: ipcex2.py (Listing 2 in the paper)
+# Python equivalent: ipcexm7.py (Listing 2 in the paper)
 #
 # In the Python version, the user sends a SIGUSR1 signal from a second
 # terminal and the sampler's signal handler fires immediately.  R does
@@ -56,8 +56,8 @@ mh_sampler <- function(y, n_iter = 500000L, step = 0.3) {
 
   cat(sprintf(
     "Sampler running (PID %d).\n", Sys.getpid()))
+  cat("For a trace plot, open another terminal and run:\n")
   cat(sprintf(
-    "For a trace plot, open another terminal and run:\n",
     "   touch %s\n", FLAG_FILE))
   cat(sprintf(
     "The sampler checks every %d iterations.\n\n", CHECK_EVERY))

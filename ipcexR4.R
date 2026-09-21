@@ -1,109 +1,85 @@
-# ipcexR4.R  --  Parallel bootstrap confidence intervals (R)
+# ipcexR4.R  --  Adaptive bootstrap confidence intervals (R)
 #
 # Supplementary material for:
 #   "How to Talk to Your Programs: Interprocess Communication for
 #    Data Scientists", The American Statistician (Teacher's Corner)
 #
-# Python equivalent: ipcex4.py (Listing 4 in the paper)
+# Python equivalent: ipcexm8.py (Listing 4 in the paper)
 #
-# The Python version uses multiprocessing.Pipe() to distribute bootstrap
-# replications across workers: the parent sends a seed through one end of
-# the pipe, and the worker sends results back through the other end.
+# The Python version keeps each worker alive for the whole computation,
+# connected to the parent by its own multiprocessing.Pipe(): a worker
+# repeatedly draws a batch of bootstrap replicate means and sends it
+# back, and the parent replies with "GO" or "STOP" once it has checked
+# whether the confidence interval has stabilized. The point is an
+# ongoing conversation over a channel that stays open, not a single
+# round-trip or a fixed-B one-shot parallel map.
 #
-# This file shows two R equivalents:
-#
-#   Method A (PSOCK sockets, cross-platform):
-#     makePSOCKcluster() opens one TCP socket connection per worker.
-#     The master sends work and receives results through these sockets --
-#     the same bidirectional channel as the Python pipe, but over TCP.
-#     This works on Linux, macOS, and Windows.
-#
-#   Method B (fork + pipe, Unix/macOS):
-#     mclapply() uses fork() and an anonymous pipe per child to collect
-#     results.  This is the closest structural match to the Python example.
-#     Does not work on Windows.
-#
-# Both methods produce identical confidence intervals.
+# A parallel::makePSOCKcluster() is the R analogue of that persistent
+# channel: each worker's R session stays alive across repeated calls to
+# parLapply(), so state set up once (the data, the per-worker RNG
+# stream) persists between rounds, the same way the Python workers'
+# local state persists between messages on their pipe. Each parLapply()
+# call is one round of the conversation; the master decides whether to
+# call it again -- the same adaptive stopping rule as the Python
+# version, expressed as a loop instead of explicit "GO"/"STOP"
+# messages, since parLapply() already blocks until every worker has
+# replied for that round.
 #
 # Requires: parallel (included in base R)
 
 library(parallel)
 
 # -------------------------------------------------------------------
-# Worker function: receives a seed, generates B_local bootstrap means
+# Worker-side function: draws one batch of bootstrap replicate means.
+# 'data' persists on each worker (exported once, below); the worker's
+# RNG stream also persists across rounds because each worker is a
+# long-lived R session, not a fresh process per call.
 # -------------------------------------------------------------------
-bootstrap_worker <- function(seed, data, B_local) {
-  set.seed(seed)
-  replicate(B_local,
-            mean(sample(data, size = length(data), replace = TRUE)))
+bootstrap_batch <- function(batch_size) {
+  replicate(batch_size,
+            mean(sample(data, length(data), replace = TRUE)))
 }
 
 # -------------------------------------------------------------------
-# Method A: PSOCK cluster (socket-based, cross-platform)
+# Parent side: opens the persistent cluster, seeds each worker once,
+# then repeats rounds of "collect a batch from everyone, check
+# stability, decide whether to continue" until the estimated interval
+# stops moving or max_rounds is reached.
 # -------------------------------------------------------------------
-parallel_bootstrap_psock <- function(data, B = 100000L, M = 4L) {
-  B_each <- B %/% M
-  seeds  <- (seq_len(M) - 1L) * 1000L
-
+adaptive_bootstrap <- function(data, M = 4L, batch_size = 50L,
+                                tol = 0.0005, max_rounds = 100L) {
   cl <- makePSOCKcluster(M)
   on.exit(stopCluster(cl))          # always close the cluster
 
-  # Export data to all workers through the socket connections.
+  # Export the data once, and seed each worker once, exactly as the
+  # Python version sends one seed per worker before the round loop
+  # begins.
   clusterExport(cl, "data", envir = environment())
+  clusterApply(cl, (seq_len(M) - 1L) * 1000L, function(s) set.seed(s))
 
-  # parLapply sends one element of 'seeds' to each worker via its
-  # socket, receives partial bootstrap samples, and collects results.
-  partial <- parLapply(cl, seeds, bootstrap_worker,
-                       data = data, B_local = B_each)
-  unlist(partial)
+  all_stats <- numeric(0)
+  prev <- NULL
+  for (round_num in seq_len(max_rounds)) {
+    batches   <- parLapply(cl, rep(batch_size, M), bootstrap_batch)
+    all_stats <- c(all_stats, unlist(batches))     # this round's batches
+    ci        <- quantile(all_stats, c(0.025, 0.975))
+    stable    <- !is.null(prev) &&
+      max(abs(ci[1] - prev[1]), abs(ci[2] - prev[2])) < tol
+    prev <- ci
+    if (stable || round_num == max_rounds) break
+  }
+  list(ci = ci, n_total = length(all_stats), n_rounds = round_num)
 }
 
 # -------------------------------------------------------------------
-# Method B: fork-based (Linux / macOS only)
-# -------------------------------------------------------------------
-parallel_bootstrap_fork <- function(data, B = 100000L, M = 4L) {
-  B_each <- B %/% M
-  seeds  <- (seq_len(M) - 1L) * 1000L
-
-  # mclapply forks M workers; each child communicates its result back
-  # to the parent through an anonymous pipe created by the OS.
-  partial <- mclapply(seeds, bootstrap_worker,
-                      data = data, B_local = B_each,
-                      mc.cores = M)
-  unlist(partial)
-}
-
-# -------------------------------------------------------------------
-# Compare sequential vs. parallel (choose one method to run)
+# Run it
 # -------------------------------------------------------------------
 set.seed(0)
 data <- rexp(1000L, rate = 0.5)   # Exponential(scale = 2); matches Python
 
-# Sequential baseline
-t_seq <- system.time({
-  seq_stats <- replicate(100000L,
-                 mean(sample(data, length(data), replace = TRUE)))
-  seq_ci <- quantile(seq_stats, c(0.025, 0.975))
-})
-
-# Parallel -- PSOCK (works everywhere)
-t_psock <- system.time({
-  par_stats_psock <- parallel_bootstrap_psock(data, B = 100000L, M = 4L)
-  par_ci_psock    <- quantile(par_stats_psock, c(0.025, 0.975))
-})
-
-# Parallel -- fork (Linux / macOS)
-# Uncomment if not on Windows:
-# t_fork <- system.time({
-#   par_stats_fork <- parallel_bootstrap_fork(data, B = 100000L, M = 4L)
-#   par_ci_fork    <- quantile(par_stats_fork, c(0.025, 0.975))
-# })
-
-cat(sprintf("Sequential  95%% CI: [%.3f, %.3f]  (%.1f s)\n",
-            seq_ci[1],          seq_ci[2],          t_seq["elapsed"]))
-cat(sprintf("Parallel (PSOCK) 95%% CI: [%.3f, %.3f]  (%.1f s)\n",
-            par_ci_psock[1],    par_ci_psock[2],    t_psock["elapsed"]))
-
-# Expected output on a quad-core laptop (times will vary):
-#   Sequential  95% CI: [1.857, 2.151]  (8.1 s)
-#   Parallel (PSOCK) 95% CI: [1.854, 2.149]  (2.5 s)
+result <- adaptive_bootstrap(data, M = 4L)
+cat(sprintf(
+  "95%% CI: [%.3f, %.3f]  (half-width %.3f, %d replicates, %d rounds)\n",
+  result$ci[1], result$ci[2],
+  (result$ci[2] - result$ci[1]) / 2,
+  result$n_total, result$n_rounds))
