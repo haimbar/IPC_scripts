@@ -1,9 +1,11 @@
 import signal, os, numpy as np, matplotlib.pyplot as plt
 
-# Example #7 (MCMC monitoring):
-# On-demand trace plots for a Metropolis-Hastings sampler. Corresponds
-# to Listing 2 ("On-demand trace plots for an MCMC sampler") in the
-# paper. Send SIGUSR1 to the printed PID at any point while this is
+# ipcex2.py  --  On-demand trace plots for an MCMC sampler (Python)
+#
+# Corresponds to Listing 2 ("On-demand trace plots for an MCMC
+# sampler") in the paper. R equivalent: ipcex2.R
+#
+# Send SIGUSR1 to the printed PID at any point while this is
 # running to see a live trace plot; the sampler resumes right after.
 #
 # The SIGUSR1 handler (request_plot) does as little as possible: it

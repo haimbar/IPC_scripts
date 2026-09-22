@@ -1,10 +1,10 @@
-# ipcexR3.R  --  Dynamic load balancing (R)
+# ipcex3.R  --  Dynamic load balancing (R)
 #
 # Supplementary material for:
 #   "How to Talk to Your Programs: Interprocess Communication for
 #    Data Scientists", The American Statistician (Teacher's Corner)
 #
-# Python equivalent: ipcexm4.py (Listing 3 in the paper)
+# Python equivalent: ipcex3.py (Listing 3 in the paper)
 #
 # The Python version forks M workers ONCE; each worker claims the next
 # unclaimed task index for itself (protected by a lock) as soon as it
@@ -38,7 +38,7 @@ library(parallel)
 M  <- 3L    # max concurrent processes
 xs <- 0:11  # tasks: compute x^2 for each x
 
-do_something <- function(x, M = 3L) {
+random_walk <- function(x, M = 3L) {
   pid <- Sys.getpid()
   cat(sprintf("PID %d starting task x=%d\n", pid, x))
   Sys.sleep(M * (x %% M + 1L))   # simulate variable runtimes
@@ -50,7 +50,7 @@ do_something <- function(x, M = 3L) {
 cat("=== Dynamic scheduling (mc.preschedule = FALSE) ===\n")
 t_dynamic <- system.time({
   results_dynamic <- mclapply(
-    xs, do_something, M = M,
+    xs, random_walk, M = M,
     mc.cores       = M,
     mc.preschedule = FALSE   # dynamic: next free slot gets next task
   )
@@ -74,6 +74,6 @@ cat(sprintf("Elapsed: %.1f s\n\n", t_dynamic["elapsed"]))
 #
 # cl <- makePSOCKcluster(M)
 # clusterExport(cl, "M")
-# results_psock <- parLapply(cl, xs, do_something, M = M)
+# results_psock <- parLapply(cl, xs, random_walk, M = M)
 # stopCluster(cl)
 # cat("Results:", unlist(results_psock), "\n")

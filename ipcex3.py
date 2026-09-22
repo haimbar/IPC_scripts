@@ -2,8 +2,10 @@ import signal, os, time
 import multiprocessing as mp
 import numpy as np
 
-# Example #4 (dynamic load balancing): Corresponds to Section 3.3 /
-# Listing 3 in the paper.
+# ipcex3.py  --  Dynamic load balancing (Python)
+#
+# Corresponds to Section 3.3 / Listing 3 in the paper.
+# R equivalent: ipcex3.R
 #
 # Each task is a first-passage-time random walk: it runs until it
 # first crosses +/-L, where L stands in for something like gene length
@@ -55,7 +57,7 @@ def barrier_for(x):
     return rng.uniform(2, 4)
 
 
-def do_something(x):
+def random_walk(x):
     L = barrier_for(x)
     rng = np.random.default_rng(x)
     pos, steps = 0.0, 0
@@ -75,7 +77,7 @@ def run_static(xs, M):
         pid = os.fork()
         if pid == 0:
             for x in xs[m * chunk:(m + 1) * chunk]:
-                do_something(x)
+                random_walk(x)
             os._exit(0)
         pids.append(pid)
     for pid in pids:
@@ -105,7 +107,7 @@ def run_dynamic(xs, M):
                 if i >= n:
                     break
                 next_idx.value += 1
-            do_something(xs[i])
+            random_walk(xs[i])
         os._exit(0)
 
     signal.signal(signal.SIGCHLD, on_child_done)

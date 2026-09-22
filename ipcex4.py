@@ -1,9 +1,12 @@
 from multiprocessing import Process, Pipe
 import numpy as np
 
-# Example #8 (adaptive parallel bootstrap):
+# ipcex4.py  --  Adaptive parallel bootstrap (Python)
+#
 # Corresponds to Listing 4 ("Adaptive parallel bootstrap using pipes")
-# in the paper. Distributes bootstrap resampling across M worker
+# in the paper. R equivalent: ipcex4.R
+#
+# Distributes bootstrap resampling across M worker
 # processes, each connected to the parent by its own
 # multiprocessing.Pipe(). Each worker repeatedly draws a batch of
 # bootstrap replicate means and sends the batch back through the pipe;

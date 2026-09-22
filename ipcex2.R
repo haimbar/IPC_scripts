@@ -1,10 +1,10 @@
-# ipcexR2.R  --  On-demand trace plots for an MCMC sampler (R)
+# ipcex2.R  --  On-demand trace plots for an MCMC sampler (R)
 #
 # Supplementary material for:
 #   "How to Talk to Your Programs: Interprocess Communication for
 #    Data Scientists", The American Statistician (Teacher's Corner)
 #
-# Python equivalent: ipcexm7.py (Listing 2 in the paper)
+# Python equivalent: ipcex2.py (Listing 2 in the paper)
 #
 # In the Python version, the user sends a SIGUSR1 signal from a second
 # terminal and the sampler's signal handler fires immediately.  R does

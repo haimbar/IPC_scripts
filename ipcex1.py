@@ -1,7 +1,9 @@
 import signal, os
 
-# Example #1 (timeout): Corresponds to Listing 1 ("Setting a timeout
-# with SIGALRM") in the paper.
+# ipcex1.py  --  Setting a timeout for a function (Python)
+#
+# Corresponds to Listing 1 ("Setting a timeout with SIGALRM") in the
+# paper. R equivalent: ipcex1.R
 #
 # signal.alarm(5) asks the OS to deliver SIGALRM five seconds from
 # now; signal.signal(...) registers handle_timeout to run when it

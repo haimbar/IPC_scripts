@@ -1,10 +1,10 @@
-# ipcexR4.R  --  Adaptive bootstrap confidence intervals (R)
+# ipcex4.R  --  Adaptive bootstrap confidence intervals (R)
 #
 # Supplementary material for:
 #   "How to Talk to Your Programs: Interprocess Communication for
 #    Data Scientists", The American Statistician (Teacher's Corner)
 #
-# Python equivalent: ipcexm8.py (Listing 4 in the paper)
+# Python equivalent: ipcex4.py (Listing 4 in the paper)
 #
 # The Python version keeps each worker alive for the whole computation,
 # connected to the parent by its own multiprocessing.Pipe(): a worker
